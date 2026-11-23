@@ -77,12 +77,13 @@ Future<bool> _confirmWarnings(BuildContext context, List<String> warnings) async
   return go == true;
 }
 
-void _toast(BuildContext context, String message) {
-  if (!context.mounted) return;
-  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+void _toast(ScaffoldMessengerState messenger, String message) {
+  messenger.showSnackBar(SnackBar(content: Text(message)));
 }
 
 Future<void> exportOne(BuildContext context, Ad ad, Marketplace m) async {
+  // Captured before any await so no BuildContext is used across async gaps.
+  final messenger = ScaffoldMessenger.of(context);
   final warnings = exportWarnings(m, ad);
   if (warnings.isNotEmpty && !await _confirmWarnings(context, warnings)) return;
   try {
@@ -93,13 +94,14 @@ Future<void> exportOne(BuildContext context, Ad ad, Marketplace m) async {
       extension: 'txt',
       dialogTitle: 'Save ${m.name} export',
     );
-    _toast(context, saved == null ? 'Export cancelled' : 'Saved ${m.name} export');
+    _toast(messenger, saved == null ? 'Export cancelled' : 'Saved ${m.name} export');
   } catch (e) {
-    _toast(context, 'Export failed: $e');
+    _toast(messenger, 'Export failed: $e');
   }
 }
 
 Future<void> exportAll(BuildContext context, Ad ad) async {
+  final messenger = ScaffoldMessenger.of(context);
   final warnings = <String>[
     for (final m in Marketplaces.all)
       for (final w in exportWarnings(m, ad)) w,
@@ -112,8 +114,8 @@ Future<void> exportAll(BuildContext context, Ad ad) async {
       extension: 'zip',
       dialogTitle: 'Save all-platform export',
     );
-    _toast(context, saved == null ? 'Export cancelled' : 'Saved all-platform export');
+    _toast(messenger, saved == null ? 'Export cancelled' : 'Saved all-platform export');
   } catch (e) {
-    _toast(context, 'Export failed: $e');
+    _toast(messenger, 'Export failed: $e');
   }
 }

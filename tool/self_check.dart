@@ -1,3 +1,4 @@
+// ignore_for_file: avoid_relative_lib_imports
 // Plain-Dart checks of the core logic (no packages needed):
 //   dart run tool/self_check.dart [optional-zip-output-path]
 import 'dart:io';
