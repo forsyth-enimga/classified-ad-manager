@@ -25,4 +25,12 @@ for f in android/app/build.gradle android/app/build.gradle.kts; do
   fi
 done
 
+# The release APK needs the INTERNET permission (flutter create only adds it to
+# debug/profile builds) for "Import from link".
+MANIFEST=android/app/src/main/AndroidManifest.xml
+if ! grep -q 'android.permission.INTERNET' "$MANIFEST"; then
+  sed -i 's#<application#<uses-permission android:name="android.permission.INTERNET"/>\n    <application#' "$MANIFEST"
+fi
+grep -n "INTERNET" "$MANIFEST"
+
 flutter pub get

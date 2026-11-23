@@ -6,6 +6,8 @@ import 'dart:io';
 import '../lib/core/ad.dart';
 import '../lib/core/ad_filter.dart';
 import '../lib/core/exporter.dart';
+import '../lib/core/importing/listing_parser.dart';
+import '../lib/core/importing/providers.dart';
 import '../lib/core/marketplaces.dart';
 import '../lib/core/validation.dart';
 
@@ -29,7 +31,26 @@ Ad sample() => Ad(
       location: 'Calgary, AB T3P 1S7',
     );
 
+/// Runs [body] and returns the ImportErrorKind it throws, or null.
+ImportErrorKind? importError(void Function() body) {
+  try {
+    body();
+    return null;
+  } on ImportException catch (e) {
+    return e.kind;
+  }
+}
+
+String? _argValue(List<String> args, String name) {
+  for (final a in args) {
+    if (a.startsWith('--$name=')) return a.substring(name.length + 3);
+  }
+  return null;
+}
+
 void main(List<String> args) {
+  final zipOut = _argValue(args, 'zip') ?? args.where((a) => !a.startsWith('--')).firstOrNull;
+  final fixturesDir = _argValue(args, 'fixtures');
   // --- export format -------------------------------------------------------
   final ad = sample();
   final text = buildExportText(Marketplaces.karrot, ad);
@@ -152,9 +173,112 @@ void main(List<String> args) {
   check('slug fallback', slugify('???') == 'ad');
   final zip = buildAllZip(sample());
   check('zip starts with PK', zip[0] == 0x50 && zip[1] == 0x4b);
-  if (args.isNotEmpty) {
-    File(args.first).writeAsBytesSync(zip);
-    stdout.writeln('wrote ${args.first} (${zip.length} bytes)');
+  if (zipOut != null) {
+    File(zipOut).writeAsBytesSync(zip);
+    stdout.writeln('wrote $zipOut (${zip.length} bytes)');
+  }
+
+  // --- import: provider matching and URL handling ---------------------------
+  String? prov(String u) => providerForUrl(Uri.parse(u))?.id;
+  check('kijiji.ca matches', prov('https://www.kijiji.ca/v-x/calgary/y/1') == 'kijiji');
+  check('ebay.ca / ebay.com / ebay.co.uk match',
+      prov('https://www.ebay.ca/itm/1') == 'ebay' &&
+          prov('https://ebay.com/itm/1') == 'ebay' &&
+          prov('https://www.ebay.co.uk/itm/1') == 'ebay');
+  check('ebay.us short link matches', prov('https://ebay.us/abc') == 'ebay');
+  check('facebook / fb.me match',
+      prov('https://www.facebook.com/marketplace/item/1') == 'facebook' &&
+          prov('https://m.facebook.com/marketplace/item/1') == 'facebook' &&
+          prov('https://fb.me/x') == 'facebook');
+  check('varagesale/karrot/poshmark/depop match',
+      prov('https://www.varagesale.com/items/x') == 'varagesale' &&
+          prov('https://karrotmarket.com/ca/buy-sell/x/') == 'karrot' &&
+          prov('https://poshmark.ca/listing/x') == 'poshmark' &&
+          prov('https://poshmark.com/listing/x') == 'poshmark' &&
+          prov('https://www.depop.com/products/x/') == 'depop');
+  check('look-alike domains do not match',
+      prov('https://notkijiji.ca/x') == null &&
+          prov('https://kijiji.ca.evil.com/x') == null &&
+          prov('https://example.com/x') == null);
+  check('bare link gets https', parseUserUrl('kijiji.ca/v-a/b/c/1').scheme == 'https');
+  check('empty link is invalid', importError(() => parseUserUrl('  ')) == ImportErrorKind.invalidUrl);
+  check('garbage is invalid', importError(() => parseUserUrl('not a url')) == ImportErrorKind.invalidUrl);
+  check('listing URLs normalise',
+      normalizeListingUrl('https://www.depop.com/products/abc-123/?moduleOrigin=meganav') ==
+          normalizeListingUrl('http://depop.com/products/abc-123'));
+
+  // --- import: generic page handling ---------------------------------------
+  const ldPage =
+      '<html><head><script type="application/ld+json">{"@type":"Product","name":"Tea &amp; Cups","description":"Nice\\r\\nset","offers":{"price":"12.50","itemCondition":"https://schema.org/UsedCondition"}}</script></head></html>';
+  final generic = parseListing(Marketplaces.facebook, ldPage,
+      url: Uri.parse('https://www.facebook.com/marketplace/item/1?ref=x'), today: DateTime(2026, 11, 22));
+  check('generic: entities decoded in title', generic.ad.title == 'Tea & Cups', generic.ad.title);
+  check('generic: price and condition', generic.ad.price == 12.5 && generic.ad.condition == 'Used');
+  check('generic: marked posted today',
+      generic.ad.isPosted('facebook') && generic.ad.postedDate['facebook'] == '2026-11-22');
+  check('generic: listing URL stored without query',
+      generic.ad.extraValue('facebook.listing_url') == 'https://www.facebook.com/marketplace/item/1');
+  check('generic: missing category reported', generic.missing.contains('category'));
+  check('login wall -> loginRequired',
+      importError(() => parseListing(Marketplaces.facebook, '<html><form id="login_form"></form></html>')) ==
+          ImportErrorKind.loginRequired);
+  check('bot check page -> blocked',
+      importError(() => parseListing(Marketplaces.kijiji, '<html><title>Access Denied</title></html>')) ==
+          ImportErrorKind.blocked);
+  check('empty page -> noListingData',
+      importError(() => parseListing(Marketplaces.kijiji, '<html><body>hi</body></html>')) ==
+          ImportErrorKind.noListingData);
+  const depopLd =
+      '<script type="application/ld+json">{"@type":"Product","name":"Short...","description":"Title line\\n\\nBody text\\n\\n#a #b","offers":{"price":"9"}}</script>';
+  final dp = parseListing(Marketplaces.depop, depopLd);
+  check('depop: title/description/hashtags split',
+      dp.ad.title == 'Title line' &&
+          dp.ad.description == 'Body text' &&
+          dp.ad.extraValue('depop.hashtags') == '#a #b',
+      '${dp.ad.title} | ${dp.ad.description} | ${dp.ad.extraValue('depop.hashtags')}');
+  check('depop import round-trips through export',
+      buildExportText(Marketplaces.depop, dp.ad).startsWith('Description\nTitle line\n\nBody text\n\n#a #b\n'));
+  check('over-limit title kept in full (user must shorten)',
+      parseListing(Marketplaces.facebook, ldPage.replaceFirst('Tea &amp; Cups', 'x' * 120)).ad.title.length == 120);
+
+  // --- import: real page sources (only when --fixtures=DIR is given) --------
+  if (fixturesDir != null) {
+    String read(String n) => File('$fixturesDir/$n').readAsStringSync();
+    final kar = parseListing(Marketplaces.karrot, read('KarrotSource.txt'));
+    check('karrot fixture', kar.ad.title.startsWith('Gucci') && kar.ad.price == 80 && kar.ad.condition == 'Like new' &&
+        kar.ad.category == 'Health & Beauty > Fragrance > Eaux De Parfum' && kar.ad.extraValue('karrot.listing_type') == 'For sale', kar.ad.category);
+    final vs = parseListing(Marketplaces.varagesale, read('VaragesaleSource.txt'));
+    check('varagesale fixture', vs.ad.title.startsWith('Lululemon') && vs.ad.price == 30 &&
+        vs.ad.category == 'Clothing > Women > Active > Small (4-6)' && vs.ad.location == 'Cochrane, AB', vs.ad.category);
+    final kj = parseListing(Marketplaces.kijiji, read('KijijiSource.txt'));
+    check('kijiji fixture', kj.ad.title == 'Razer Kishi' && kj.ad.price == 20 && kj.ad.condition == 'Used - Fair' &&
+        kj.ad.category == 'Buy and Sell > Video Games and Consoles > Other' &&
+        kj.ad.extraValue('kijiji.cash') == 'true' && kj.ad.extraValue('kijiji.for_sale_by') == 'Owner', kj.ad.category);
+    check('kijiji: street address is not imported', !kj.ad.location.contains('Blvd') && kj.ad.location.startsWith('Calgary'), kj.ad.location);
+    final pm = parseListing(Marketplaces.poshmark, read('PoshmarkSource.txt'));
+    check('poshmark fixture (price from meta data)', pm.ad.price == 560 && pm.ad.condition == 'Like New' &&
+        pm.ad.extraValue('poshmark.brand') == 'Juicy Couture' && pm.ad.extraValue('poshmark.colors') == 'Pink, Black' &&
+        pm.ad.category == 'Women > Bags > Shoulder Bags', '${pm.ad.price} ${pm.ad.category}');
+    final eb = parseListing(Marketplaces.ebay, read('eBaySource.txt'),
+        ebayDescriptionHtml: '<div>Hello<br>World</div>');
+    check('ebay fixture', eb.ad.title.startsWith('Ed Hardy') && eb.ad.price == 80 && eb.ad.condition == 'New with tags' &&
+        eb.ad.extraValue('ebay.buyer_pays') == '40.00' && eb.ad.extraValue('ebay.item_specifics').contains('Brand: Ed Hardy') &&
+        eb.ad.description == 'Hello\nWorld', eb.ad.condition);
+    check('ebay without description page leaves it blank',
+        parseListing(Marketplaces.ebay, read('eBaySource.txt')).missing.contains('description'));
+    final dpFix = parseListing(Marketplaces.depop, read('DepopSource.txt'));
+    check('depop fixture', dpFix.ad.title.startsWith('2010s Twilight Bella & Edward') && dpFix.ad.price == 35 &&
+        dpFix.ad.extraValue('depop.hashtags').startsWith('#twilight') && dpFix.ad.extraValue('depop.size') == 'L' &&
+        dpFix.ad.extraValue('depop.colors') == 'Black', dpFix.ad.title);
+    for (final f in ['Karrot', 'Varagesale', 'Kijiji', 'Poshmark', 'eBay', 'Depop']) {
+      check('$f source auto-detects its provider', detectProviderFromSource(read('${f}Source.txt')) != null);
+    }
+    check('clean imports pass validation', validateAd(kar.ad).isEmpty && validateAd(pm.ad).isEmpty && validateAd(vs.ad).isEmpty);
+    // The real Kijiji ad has a description over the 500-character limit: it is
+    // imported in full and the form asks the user to shorten it.
+    final kjErrors = validateAd(kj.ad);
+    check('over-limit Kijiji description is flagged, not truncated',
+        kjErrors.keys.toList().join() == 'description' && kj.ad.description.length > 500, '$kjErrors');
   }
 
   stdout.writeln(_failed == 0 ? '\nAll checks passed.' : '\n$_failed check(s) FAILED.');

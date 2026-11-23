@@ -9,10 +9,13 @@ import '../data/ad_repository.dart';
 
 /// Add / edit form. A new ad is an [Ad] with a null id.
 class AdFormScreen extends StatefulWidget {
-  const AdFormScreen({super.key, required this.repo, required this.ad});
+  const AdFormScreen({super.key, required this.repo, required this.ad, this.notice});
 
   final AdRepository repo;
   final Ad ad;
+
+  /// Shown at the top (used after an import).
+  final String? notice;
 
   @override
   State<AdFormScreen> createState() => _AdFormScreenState();
@@ -28,6 +31,7 @@ class _AdFormScreenState extends State<AdFormScreen> {
   void initState() {
     super.initState();
     _ad = widget.ad.copy();
+    if (widget.notice != null) _errors = validateAd(_ad);
   }
 
   @override
@@ -346,6 +350,21 @@ class _AdFormScreenState extends State<AdFormScreen> {
           child: ListView(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 48),
             children: [
+              if (widget.notice != null)
+                Card(
+                  color: Theme.of(context).colorScheme.secondaryContainer,
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Icon(Icons.info_outline),
+                        const SizedBox(width: 8),
+                        Expanded(child: Text(widget.notice!)),
+                      ],
+                    ),
+                  ),
+                ),
               _section('Required for every platform'),
               _textField(
                 key: 'title',

@@ -87,10 +87,19 @@ class Marketplace {
   /// Fields that appear in the form but are folded into another export entry.
   final List<FieldDef> formOnly;
 
+  /// Link to the live listing (filled by "Import from link"; never exported).
+  FieldDef get listingUrlField => FieldDef(
+        '$id.listing_url',
+        'Listing URL',
+        FieldType.text,
+        hint: 'Link to your live listing on $name',
+      );
+
   List<FieldDef> get ownFields => <FieldDef>[
         for (final e in entries)
           if (e.field != null) e.field!,
         ...formOnly,
+        listingUrlField,
       ];
 
   List<Entry> get overridables =>

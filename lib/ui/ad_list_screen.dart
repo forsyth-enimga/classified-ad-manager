@@ -2,10 +2,14 @@ import 'package:flutter/material.dart';
 
 import '../core/ad.dart';
 import '../core/ad_filter.dart';
+import '../core/importing/listing_parser.dart';
+import '../core/importing/providers.dart';
+import '../core/validation.dart';
 import '../core/marketplaces.dart';
 import '../data/ad_repository.dart';
 import 'ad_form_screen.dart';
 import 'export_actions.dart';
+import 'import_dialog.dart';
 import 'trash_screen.dart';
 
 class AdListScreen extends StatefulWidget {
@@ -42,13 +46,63 @@ class _AdListScreenState extends State<AdListScreen> {
     });
   }
 
-  Future<void> _openForm(Ad ad) async {
+  Future<void> _openForm(Ad ad, {String? notice}) async {
     await Navigator.of(context).push<bool>(
       MaterialPageRoute<bool>(
-        builder: (_) => AdFormScreen(repo: widget.repo, ad: ad),
+        builder: (_) => AdFormScreen(repo: widget.repo, ad: ad, notice: notice),
       ),
     );
     await _load();
+  }
+
+  /// Import from link / pasted source, then open the pre-filled (unsaved) form.
+  Future<void> _import() async {
+    final result = await showImportDialog(context);
+    if (result == null || !mounted) return;
+
+    final urlKey = '${result.marketplace.id}.listing_url';
+    final wanted = result.sourceUrl == null ? '' : normalizeListingUrl(result.sourceUrl!);
+    Ad? existing;
+    if (wanted.isNotEmpty) {
+      for (final a in _ads) {
+        final u = a.extraValue(urlKey);
+        if (u.isNotEmpty && normalizeListingUrl(u) == wanted) {
+          existing = a;
+          break;
+        }
+      }
+    }
+    final dup = existing;
+    if (dup != null) {
+      final choice = await showDialog<String>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Already imported'),
+          content: Text('"${dup.title}" was already added from this link.'),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(ctx).pop('cancel'), child: const Text('Cancel')),
+            TextButton(onPressed: () => Navigator.of(ctx).pop('open'), child: const Text('Open existing')),
+            FilledButton(onPressed: () => Navigator.of(ctx).pop('import'), child: const Text('Import anyway')),
+          ],
+        ),
+      );
+      if (!mounted) return;
+      if (choice == 'open') {
+        await _openForm(dup);
+        return;
+      }
+      if (choice != 'import') return;
+    }
+
+    final notes = <String>[
+      'Imported from ${result.marketplace.name}. Review everything before saving.',
+      if (result.missing.isNotEmpty)
+        'Not found on the page, please fill in: ${result.missing.join(', ')}.',
+      for (final e in validateAd(result.ad).entries)
+        if ((e.key == 'title' || e.key == 'description') && e.value.contains('characters or fewer'))
+          e.value,
+    ];
+    await _openForm(result.ad, notice: notes.join('\n'));
   }
 
   Future<void> _openTrash() async {
@@ -111,6 +165,11 @@ class _AdListScreenState extends State<AdListScreen> {
       appBar: AppBar(
         title: const Text('Classified Ad Manager'),
         actions: [
+          IconButton(
+            tooltip: 'Import from link',
+            icon: const Icon(Icons.link),
+            onPressed: _import,
+          ),
           IconButton(
             tooltip: 'Trash',
             icon: const Icon(Icons.delete_outline),
