@@ -31,6 +31,9 @@ class _Draft {
   String location = '';
   final Map<String, String> extra = <String, String>{};
 
+  /// Listing URL found inside the page data (used when no URL was given).
+  String? sourceUrl;
+
   void put(String key, String? value) {
     final v = (value ?? '').trim();
     if (v.isNotEmpty) extra[key] = v;
@@ -77,6 +80,11 @@ Marketplace? detectProviderFromSource(String html) {
     if (u == null) continue;
     final p = providerForUrl(u);
     if (p != null) return p;
+  }
+  // Facebook pages carry no canonical link: use their own markers.
+  if (RegExp(r'<html[^>]*\sid="facebook"').hasMatch(html) ||
+      html.contains(r'"share_uri":"https:\/\/www.facebook.com\/marketplace')) {
+    return Marketplaces.facebook;
   }
   return null;
 }
@@ -161,7 +169,7 @@ ParsedListing parseListing(
     case 'depop':
       _depop(d, html, product);
     case 'facebook':
-      break; // generic data only (login wall is the common case)
+      _facebook(d, html, url);
   }
 
   if (d.title.isEmpty && d.price == null) {
@@ -169,6 +177,12 @@ ParsedListing parseListing(
       throw ImportException(
         ImportErrorKind.loginRequired,
         'This page needs you to log in, so the listing could not be read.',
+      );
+    }
+    if (marketplace.id == 'facebook' && !looksBlocked(html)) {
+      throw ImportException(
+        ImportErrorKind.loginRequired,
+        'Facebook did not provide the listing details; Marketplace listings usually need you to log in. Open the listing in your browser while logged in, copy the page source, and use "Import from pasted page source".',
       );
     }
     if (looksBlocked(html)) {
@@ -193,7 +207,9 @@ ParsedListing parseListing(
   );
   ad.extra.addAll(d.extra);
 
-  final listingUrl = url != null ? cleanUrl(url.toString()) : detectListingUrl(html);
+  final listingUrl = url != null
+      ? cleanUrl(url.toString())
+      : (d.sourceUrl != null ? cleanUrl(d.sourceUrl!) : detectListingUrl(html));
   if (listingUrl != null && listingUrl.isNotEmpty) {
     ad.extra['${marketplace.id}.listing_url'] = listingUrl;
   }
@@ -350,6 +366,93 @@ void _varagesale(_Draft d, String html) {
         .toList();
     d.put('varagesale.communities', names.join(', '));
   }
+}
+
+// ---------------------------------------------------------------------------
+// Facebook Marketplace: listing object inside the page's embedded JSON.
+// The page names no category (only a numeric id), so category stays blank.
+// ---------------------------------------------------------------------------
+
+Map<String, dynamic>? _facebookListing(String html, String? wantedId) {
+  Map<String, dynamic>? fallback;
+  Map<String, dynamic>? found;
+
+  void walk(dynamic o) {
+    if (found != null) return;
+    if (o is Map) {
+      if (o.containsKey('marketplace_listing_title') && o.containsKey('redacted_description')) {
+        final m = Map<String, dynamic>.from(o);
+        if (wantedId == null || m['id']?.toString() == wantedId) {
+          found = m;
+          return;
+        }
+        fallback ??= m;
+      }
+      for (final v in o.values) {
+        walk(v);
+      }
+    } else if (o is List) {
+      for (final v in o) {
+        walk(v);
+      }
+    }
+  }
+
+  final re = RegExp(r'<script[^>]*type="application/json"[^>]*>(.*?)</script>', dotAll: true);
+  for (final m in re.allMatches(html)) {
+    final body = m.group(1)!;
+    if (!body.contains('redacted_description')) continue;
+    try {
+      walk(jsonDecode(body));
+    } catch (_) {
+      // not the script we want
+    }
+    if (found != null) break;
+  }
+  return found ?? fallback;
+}
+
+void _facebook(_Draft d, String html, Uri? url) {
+  final idMatch = url == null ? null : RegExp(r'/marketplace/item/(\d+)').firstMatch(url.path);
+  final l = _facebookListing(html, idMatch?.group(1));
+  if (l == null) return;
+
+  // Titles can contain line breaks; the form wants one line.
+  d.title = (l['marketplace_listing_title'] ?? '').toString().replaceAll(RegExp(r'\s*\n\s*'), ' ').trim();
+  final desc = l['redacted_description'];
+  if (desc is Map && desc['text'] != null) {
+    d.description = desc['text'].toString().replaceAll('\r\n', '\n').trim();
+  }
+  final price = l['listing_price'];
+  if (price is Map) d.price = parseNumber(price['amount']);
+  final loc = l['location_text'];
+  if (loc is Map && loc['text'] != null) d.location = loc['text'].toString().trim();
+
+  final attrs = l['attribute_data'];
+  if (attrs is List) {
+    for (final a in attrs) {
+      if (a is Map && (a['attribute_name'] ?? '').toString().toLowerCase() == 'condition') {
+        d.condition = (a['label'] ?? a['value'] ?? '').toString().trim();
+      }
+    }
+  }
+
+  final inv = (l['listing_inventory_type'] ?? '').toString();
+  if (inv.isNotEmpty) {
+    d.extra['facebook.availability'] =
+        inv == 'SINGLE_QUANTITY' ? 'List as Single Item' : 'List as In Stock';
+  }
+  final tags = l['marketplace_hashtags'];
+  if (tags is Map && tags['nodes'] is List) {
+    final names = (tags['nodes'] as List)
+        .whereType<Map>()
+        .map((n) => (n['tag_name'] ?? '').toString().trim())
+        .where((t) => t.isNotEmpty)
+        .take(20)
+        .toList();
+    d.put('facebook.product_tags', names.join(', '));
+  }
+  if (l['share_uri'] is String) d.sourceUrl = l['share_uri'] as String;
 }
 
 // ---------------------------------------------------------------------------

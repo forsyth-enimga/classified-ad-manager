@@ -222,6 +222,9 @@ void main(List<String> args) {
   check('login wall -> loginRequired',
       importError(() => parseListing(Marketplaces.facebook, '<html><form id="login_form"></form></html>')) ==
           ImportErrorKind.loginRequired);
+  check('facebook page with no listing data -> loginRequired',
+      importError(() => parseListing(Marketplaces.facebook, '<html><body>Something went wrong</body></html>')) ==
+          ImportErrorKind.loginRequired);
   check('bot check page -> blocked',
       importError(() => parseListing(Marketplaces.kijiji, '<html><title>Access Denied</title></html>')) ==
           ImportErrorKind.blocked);
@@ -270,7 +273,22 @@ void main(List<String> args) {
     check('depop fixture', dpFix.ad.title.startsWith('2010s Twilight Bella & Edward') && dpFix.ad.price == 35 &&
         dpFix.ad.extraValue('depop.hashtags').startsWith('#twilight') && dpFix.ad.extraValue('depop.size') == 'L' &&
         dpFix.ad.extraValue('depop.colors') == 'Black', dpFix.ad.title);
-    for (final f in ['Karrot', 'Varagesale', 'Kijiji', 'Poshmark', 'eBay', 'Depop']) {
+    final fb = parseListing(Marketplaces.facebook, read('FacebookSource.txt'));
+    check('facebook fixture', fb.ad.title == 'i5 Dell Optiplex 3040 - 16GB RAM - SSD - Windows 11 Pro Computer / Desktop PC' &&
+        fb.ad.price == 80 && fb.ad.condition == 'Used - Good' && fb.ad.location == 'Calgary, AB' &&
+        fb.ad.description.startsWith('For sale I have this small form factor Dell Optiplex 3040') &&
+        fb.ad.extraValue('facebook.availability') == 'List as Single Item' &&
+        fb.ad.extraValue('facebook.product_tags').contains('Windows 11'), fb.ad.title);
+    check('facebook: price is the listing price, not the struck-through one', fb.ad.price != 100);
+    check('facebook: listing URL comes from the page data',
+        fb.ad.extraValue('facebook.listing_url') == 'https://www.facebook.com/marketplace/item/1891206475050655/', fb.ad.extraValue('facebook.listing_url'));
+    check('facebook: category is reported missing (page has only an id)', fb.missing.join() == 'category', '${fb.missing}');
+    check('facebook: seller name is not imported', !buildExportText(Marketplaces.facebook, fb.ad).contains('Brown'));
+    final fbWithUrl = parseListing(Marketplaces.facebook, read('FacebookSource.txt'),
+        url: Uri.parse('https://www.facebook.com/marketplace/item/1891206475050655/?referral_code=x'));
+    check('facebook: link import keeps the id-matched listing and strips the query',
+        fbWithUrl.ad.title.startsWith('i5 Dell') && fbWithUrl.ad.extraValue('facebook.listing_url') == 'https://www.facebook.com/marketplace/item/1891206475050655/');
+    for (final f in ['Karrot', 'Varagesale', 'Kijiji', 'Poshmark', 'eBay', 'Depop', 'Facebook']) {
       check('$f source auto-detects its provider', detectProviderFromSource(read('${f}Source.txt')) != null);
     }
     check('clean imports pass validation', validateAd(kar.ad).isEmpty && validateAd(pm.ad).isEmpty && validateAd(vs.ad).isEmpty);

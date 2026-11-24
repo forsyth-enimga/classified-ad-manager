@@ -70,12 +70,12 @@ Reads the structured data each page publishes (schema.org JSON-LD) plus each sit
 | Poshmark | brand, size, colour(s), style tags, condition, category (price from the page's price data) |
 | eBay | condition, category trail, item specifics, location, Buy It Now/auction, shipping cost; the description is fetched from eBay's separate description page |
 | Depop | title / description / hashtags split back apart, condition, colours, style, source, size, shipping from, shipping price (category is approximate) |
-| Facebook Marketplace | whatever is public; usually a login wall (untested against a real page) |
+| Facebook Marketplace | title, description, price, condition, location, availability, product tags (from the listing data embedded in the page). The page names no category, only a number, so you fill that in. Without a login the page has no listing data, so use pasted page source |
 
 Text over the 80/500 limits is imported in full and flagged so you can shorten it. Seller names and contact details are never imported. Photos are not imported. Sites change their pages: if a field stops importing, the parsers are in `lib/core/importing/listing_parser.dart`.
 
 Run the importer checks against saved pages with
-`dart run tool/self_check.dart --fixtures=/path/to/folder` (files named `KarrotSource.txt`, `VaragesaleSource.txt`, `KijijiSource.txt`, `PoshmarkSource.txt`, `eBaySource.txt`, `DepopSource.txt`).
+`dart run tool/self_check.dart --fixtures=/path/to/folder` (files named `FacebookSource.txt`, `KarrotSource.txt`, `VaragesaleSource.txt`, `KijijiSource.txt`, `PoshmarkSource.txt`, `eBaySource.txt`, `DepopSource.txt`).
 
 ## Layout
 
