@@ -86,6 +86,10 @@ List<String> exportWarnings(Marketplace m, Ad ad) {
       w.add('${f.label} has ${splitList(v).length} items; ${m.name} allows ${f.maxItems}.');
     }
   }
+  if (m.id == 'poshmark' && ad.description.trim().length > kPoshmarkDescriptionWarn) {
+    w.add('Description is ${ad.description.trim().length} characters; Poshmark has been '
+        'reported to allow only $kPoshmarkDescriptionWarn, so it may be cut off.');
+  }
   if (m.id == 'depop') {
     final text = depopDescription(ad);
     if (text.length > kDepopTextMax) {

@@ -101,8 +101,16 @@ void main(List<String> args) {
   ad.description = 'x' * 500;
   ad.title = 'y' * 80;
   ad.extra['depop.hashtags'] = ('#tag ' * 5).trim();
-  final long = depopDescription(ad);
-  check('depop max-size ad stays within 1000', long.length <= kDepopTextMax, '${long.length}');
+  check('depop: 80 + 500 + 5 hashtags fits in 1000',
+      depopDescription(ad).length <= kDepopTextMax && exportWarnings(Marketplaces.depop, ad).isEmpty);
+  ad.description = 'x' * 1000;
+  check('depop: a 1000-char description warns (title + description > 1000)',
+      exportWarnings(Marketplaces.depop, ad).any((w) => w.contains('allows 1000')));
+  ad.description = 'x' * 501;
+  check('poshmark warns above 500 characters',
+      exportWarnings(Marketplaces.poshmark, ad).any((w) => w.contains('Poshmark')));
+  ad.description = 'x' * 500;
+  check('poshmark does not warn at 500', exportWarnings(Marketplaces.poshmark, ad).isEmpty);
 
   // --- validation ----------------------------------------------------------
   final errs = validateAd(Ad());
@@ -115,10 +123,10 @@ void main(List<String> args) {
   check('valid ad passes', validateAd(sample()).isEmpty, validateAd(sample()).toString());
   check('title 81 chars fails', validateAd(sample()..title = 'a' * 81).containsKey('title'));
   check('title 80 chars passes', !validateAd(sample()..title = 'a' * 80).containsKey('title'));
-  check('description 501 chars fails',
-      validateAd(sample()..description = 'a' * 501).containsKey('description'));
-  check('description 500 chars passes',
-      !validateAd(sample()..description = 'a' * 500).containsKey('description'));
+  check('description 1001 chars fails',
+      validateAd(sample()..description = 'a' * 1001).containsKey('description'));
+  check('description 1000 chars passes',
+      !validateAd(sample()..description = 'a' * 1000).containsKey('description'));
   check('sold without platform fails',
       validateAd(sample()..sold = true).containsKey('sold_platform'));
   check('sold with platform passes',
@@ -241,6 +249,11 @@ void main(List<String> args) {
       '${dp.ad.title} | ${dp.ad.description} | ${dp.ad.extraValue('depop.hashtags')}');
   check('depop import round-trips through export',
       buildExportText(Marketplaces.depop, dp.ad).startsWith('Description\nTitle line\n\nBody text\n\n#a #b\n'));
+  final longDesc = parseListing(
+      Marketplaces.facebook,
+      ldPage.replaceFirst(RegExp(r'"description":"[^"]*"'), '"description":"${'z' * 1200}"'));
+  check('over-limit description kept in full and flagged',
+      longDesc.ad.description.length == 1200 && validateAd(longDesc.ad).containsKey('description'));
   check('over-limit title kept in full (user must shorten)',
       parseListing(Marketplaces.facebook, ldPage.replaceFirst('Tea &amp; Cups', 'x' * 120)).ad.title.length == 120);
 
@@ -288,15 +301,15 @@ void main(List<String> args) {
         url: Uri.parse('https://www.facebook.com/marketplace/item/1891206475050655/?referral_code=x'));
     check('facebook: link import keeps the id-matched listing and strips the query',
         fbWithUrl.ad.title.startsWith('i5 Dell') && fbWithUrl.ad.extraValue('facebook.listing_url') == 'https://www.facebook.com/marketplace/item/1891206475050655/');
+    check('facebook import fails validation only on the missing category',
+        validateAd(fb.ad).keys.join() == 'category', '${validateAd(fb.ad)}');
     for (final f in ['Karrot', 'Varagesale', 'Kijiji', 'Poshmark', 'eBay', 'Depop', 'Facebook']) {
       check('$f source auto-detects its provider', detectProviderFromSource(read('${f}Source.txt')) != null);
     }
-    check('clean imports pass validation', validateAd(kar.ad).isEmpty && validateAd(pm.ad).isEmpty && validateAd(vs.ad).isEmpty);
-    // The real Kijiji ad has a description over the 500-character limit: it is
-    // imported in full and the form asks the user to shorten it.
-    final kjErrors = validateAd(kj.ad);
-    check('over-limit Kijiji description is flagged, not truncated',
-        kjErrors.keys.toList().join() == 'description' && kj.ad.description.length > 500, '$kjErrors');
+    check('all real imports pass validation (kijiji description is 742 chars)',
+        validateAd(kar.ad).isEmpty && validateAd(pm.ad).isEmpty && validateAd(vs.ad).isEmpty &&
+            validateAd(kj.ad).isEmpty && kj.ad.description.length > 500,
+        '${validateAd(kj.ad)}');
   }
 
   stdout.writeln(_failed == 0 ? '\nAll checks passed.' : '\n$_failed check(s) FAILED.');

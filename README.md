@@ -9,7 +9,7 @@ SQLite, single user, no login, no encryption, no photo management).
 ## Features
 
 - Add, edit, clone, search/filter, move to trash (with confirmation), restore or delete permanently
-- Mandatory shared fields: **Title (max 80)**, **Description (max 500)**, **Price**, **Category** (free text)
+- Mandatory shared fields: **Title (max 80)**, **Description (max 1000)**, **Price**, **Category** (free text)
 - Optional shared fields: Condition, Location. Optional platform-only fields in one expandable section per platform
 - Per platform: *Posted* checkbox + posted date. *Sold* checkbox, sold-on dropdown (7 platforms + "Local / in person / other"), sold price, sold date
 - Relist reminder date (shows a "Relist due" badge and filter)
@@ -72,7 +72,7 @@ Reads the structured data each page publishes (schema.org JSON-LD) plus each sit
 | Depop | title / description / hashtags split back apart, condition, colours, style, source, size, shipping from, shipping price (category is approximate) |
 | Facebook Marketplace | title, description, price, condition, location, availability, product tags (from the listing data embedded in the page). The page names no category, only a number, so you fill that in. Without a login the page has no listing data, so use pasted page source |
 
-Text over the 80/500 limits is imported in full and flagged so you can shorten it. Seller names and contact details are never imported. Photos are not imported. Sites change their pages: if a field stops importing, the parsers are in `lib/core/importing/listing_parser.dart`.
+Text over the 80/1000 limits is imported in full and flagged so you can shorten it. Seller names and contact details are never imported. Photos are not imported. Sites change their pages: if a field stops importing, the parsers are in `lib/core/importing/listing_parser.dart`.
 
 Run the importer checks against saved pages with
 `dart run tool/self_check.dart --fixtures=/path/to/folder` (files named `FacebookSource.txt`, `KarrotSource.txt`, `VaragesaleSource.txt`, `KijijiSource.txt`, `PoshmarkSource.txt`, `eBaySource.txt`, `DepopSource.txt`).
@@ -87,7 +87,10 @@ Run the importer checks against saved pages with
 
 ## Field limits and sources
 
-Title 80 = lowest verified limit (eBay and Poshmark). Description 500 = Poshmark's
-lower reported limit (sources disagree with 1,500). Karrot's and Kijiji's own
-limits could not be confirmed; if either form cuts off earlier, lower
-`kTitleMax` / `kDescriptionMax` in `lib/core/marketplaces.dart`.
+Title 80 = lowest verified limit (eBay and Poshmark). Description 1000 is a chosen
+limit (Depop's box also holds the title and hashtags; Poshmark has been reported
+to cut descriptions at 500, other sources say 1,500). Karrot's and Kijiji's own
+limits could not be confirmed. An export shows a warning before saving when a
+description will not fit a platform: Depop (title + description + hashtags over
+1,000) and Poshmark (over 500). Change `kTitleMax` / `kDescriptionMax` in
+`lib/core/marketplaces.dart` to adjust the limits.

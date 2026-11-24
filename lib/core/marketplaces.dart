@@ -2,7 +2,11 @@ import 'ad.dart';
 
 /// Lowest common limits across all platforms (agreed with the user).
 const int kTitleMax = 80;
-const int kDescriptionMax = 500;
+const int kDescriptionMax = 1000;
+
+/// Poshmark has been reported to cut descriptions at 500 characters (other
+/// sources say 1,500). Longer descriptions export with a warning.
+const int kPoshmarkDescriptionWarn = 500;
 
 /// Depop has no title field: title + description + hashtags share one box.
 const int kDepopTextMax = 1000;
